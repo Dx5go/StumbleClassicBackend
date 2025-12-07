@@ -172,6 +172,11 @@ app.get("/api/v1/ping", async (req, res) => {
 });
 app.post("/api/v1/userLoginExternal", TournamentController.login);
 app.get("/api/v1/tournaments", TournamentController.getActive);
+app.get("/api/v1/tournaments/:tournamentId/stream", TournamentController.streamTournament);
+app.post("/api/v1/tournaments/:tournamentId/join", TournamentController.joinTournament);
+app.post("/api/v1/tournaments/:tournamentId/score", TournamentController.submitTournamentScore);
+app.get("/api/v1/tournaments/:tournamentId/leaderboard", TournamentController.getTournamentLeaderboard);
+app.post("/api/v1/tournaments/:tournamentId/claim", TournamentController.claimTournamentRewards);
 
 app.use(errorControll);
 

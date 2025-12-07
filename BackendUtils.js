@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
+const { EventEmitter } = require('events');
+const { v4: uuidv4 } = require('uuid');
 const Console = require("./ConsoleUtils");
 const CryptoUtils = require("./CryptoUtils");
 const config = require("./config");
@@ -14,6 +16,9 @@ const SharedData = require("./shared.json");
 if (config.urls.backendPublicUrl) {
   SharedData.BackendUrl = config.urls.backendPublicUrl;
 }
+
+const tournamentEventEmitter = new EventEmitter();
+tournamentEventEmitter.setMaxListeners(0);
 
 const BackendUtils = {
   generateId: () => crypto.randomBytes(16).toString('hex'),
@@ -78,7 +83,9 @@ class Database {
   PurchasableItems: null,
   Animations: null,
   Emotes: null,
-  Footsteps: null
+  Footsteps: null,
+  Tournaments: null,
+  TournamentParticipants: null
 };
   }
 
@@ -105,6 +112,8 @@ this.collections.PurchasableItems = this.db.collection("PurchasableItems");
 this.collections.Animations = this.db.collection("Animations");
 this.collections.Emotes = this.db.collection("Emotes");
 this.collections.Footsteps = this.db.collection("Footsteps");
+this.collections.Tournaments = this.db.collection("Tournaments");
+this.collections.TournamentParticipants = this.db.collection("TournamentParticipants");
 
     await this.createIndexes();
     await this.autoPopulateSharedData();
@@ -163,6 +172,19 @@ async autoPopulateSharedData() {
     await this.collections.Events.createIndex({ StartDateTime: 1, EndDateTime: 1 });
     await this.collections.BattlePasses.createIndex({ PassID: 1 });
     await this.collections.Skins.createIndex({ SkinID: 1 });
+    if (this.collections.Tournaments) {
+      await this.collections.Tournaments.createIndexes([
+        { key: { id: 1 }, unique: true },
+        { key: { startTime: 1, endTime: 1 } },
+        { key: { isActive: 1 } }
+      ]);
+    }
+    if (this.collections.TournamentParticipants) {
+      await this.collections.TournamentParticipants.createIndexes([
+        { key: { tournamentId: 1, userId: 1 }, unique: true },
+        { key: { tournamentId: 1, score: -1 } }
+      ]);
+    }
   }
 
   async getUserByQuery(query) {
@@ -224,10 +246,140 @@ async autoPopulateSharedData() {
 }
 
 const database = new Database();
-database.connect().catch(err => {
-  console.error('Database connection error:', err);
-  process.exit(1);
-});
+database.connect()
+  .then(() => {
+    setupTournamentWatchers();
+  })
+  .catch(err => {
+    console.error('Database connection error:', err);
+    process.exit(1);
+  });
+
+async function computeTournamentLeaderboard(tournamentId, limit = 50, persistPositions = false) {
+  const leaderboard = await database.collections.TournamentParticipants
+    .find({ tournamentId })
+    .sort({ score: -1 })
+    .limit(parseInt(limit))
+    .project({
+      _id: 0,
+      id: 1,
+      userId: 1,
+      username: 1,
+      score: 1,
+      position: 1
+    })
+    .toArray();
+
+  if (leaderboard.length === 0) {
+    return [];
+  }
+
+  let currentPosition = 1;
+  let previousScore = leaderboard[0].score;
+
+  for (let i = 0; i < leaderboard.length; i++) {
+    if (leaderboard[i].score < previousScore) {
+      currentPosition = i + 1;
+      previousScore = leaderboard[i].score;
+    }
+    leaderboard[i].position = currentPosition;
+  }
+
+  if (persistPositions) {
+    await Promise.all(
+      leaderboard.map(entry =>
+        database.collections.TournamentParticipants.updateOne(
+          { tournamentId, userId: entry.userId },
+          { $set: { position: entry.position } }
+        )
+      )
+    );
+  }
+
+  return leaderboard;
+}
+
+async function getTournamentState(tournamentId, limit = 50) {
+  const tournament = await database.collections.Tournaments.findOne({ id: tournamentId });
+  if (!tournament) {
+    return null;
+  }
+
+  const leaderboard = await computeTournamentLeaderboard(tournamentId, limit, false);
+  const now = new Date();
+  const status = tournament.status ||
+    (now < tournament.startTime ? 'upcoming' : (now > tournament.endTime ? 'finished' : 'live'));
+
+  return {
+    tournament: {
+      id: tournament.id,
+      name: tournament.name,
+      description: tournament.description,
+      startTime: tournament.startTime,
+      endTime: tournament.endTime,
+      entryFee: tournament.entryFee,
+      maxPlayers: tournament.maxPlayers,
+      currentPlayers: tournament.currentPlayers || 0,
+      isActive: tournament.isActive,
+      status
+    },
+    leaderboard
+  };
+}
+
+async function notifyTournamentUpdate(tournamentId) {
+  try {
+    const state = await getTournamentState(tournamentId);
+    if (state) {
+      tournamentEventEmitter.emit(tournamentId, state);
+    }
+  } catch (err) {
+    Console.warn('Tournament', `Notify failed for ${tournamentId}: ${err.message}`);
+  }
+}
+
+function setupTournamentWatchers() {
+  try {
+    if (typeof database.collections.Tournaments?.watch === 'function') {
+      const tournamentStream = database.collections.Tournaments.watch([
+        { $match: { operationType: { $in: ['insert', 'update', 'replace', 'delete'] } } }
+      ]);
+      tournamentStream.on('change', change => {
+        const tournamentId =
+          change.fullDocument?.id ||
+          change.documentKey?.id ||
+          change.documentKey?._id ||
+          change.updateDescription?.updatedFields?.id;
+        if (tournamentId) {
+          notifyTournamentUpdate(tournamentId);
+        }
+      });
+      tournamentStream.on('error', err => {
+        Console.warn('TournamentWatch', `Change stream disabled: ${err.message}`);
+      });
+    }
+
+    if (typeof database.collections.TournamentParticipants?.watch === 'function') {
+      const participantStream = database.collections.TournamentParticipants.watch([
+        { $match: { operationType: { $in: ['insert', 'update', 'replace', 'delete'] } } }
+      ]);
+      participantStream.on('change', change => {
+        const tournamentId =
+          change.fullDocument?.tournamentId ||
+          change.documentKey?.tournamentId ||
+          change.updateDescription?.updatedFields?.tournamentId;
+        if (tournamentId) {
+          notifyTournamentUpdate(tournamentId);
+        }
+      });
+      participantStream.on('error', err => {
+        Console.warn('ParticipantWatch', `Change stream disabled: ${err.message}`);
+      });
+    }
+  } catch (err) {
+    Console.warn('TournamentWatch', `Watcher setup failed: ${err.message}`);
+  }
+}
 
 class UserModel {
   
@@ -2407,6 +2559,7 @@ class TournamentController {
             const result = await database.collections.Tournaments.insertOne(tournament);
             
             if (result.acknowledged) {
+                await notifyTournamentUpdate(tournament.id);
                 res.status(201).json({
                     message: 'Tournament created successfully',
                     tournament
@@ -2455,6 +2608,46 @@ class TournamentController {
             Console.error('Tournament', 'Get by ID error:', err);
             res.status(500).json({ message: 'Internal server error' });
         }
+    }
+
+    static async streamTournament(req, res) {
+        const { tournamentId } = req.params;
+        if (!tournamentId) {
+            return res.status(400).json({ message: 'Tournament ID is required' });
+        }
+
+        res.set({
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        });
+        res.flushHeaders?.();
+
+        const keepAlive = setInterval(() => {
+            res.write(': ping\n\n');
+        }, 25000);
+
+        const sendState = async () => {
+            const state = await getTournamentState(tournamentId);
+            if (state) {
+                res.write(`data: ${JSON.stringify(state)}\\n\\n`);
+            } else {
+                res.write(`event: error\\ndata: ${JSON.stringify({ message: 'Tournament not found' })}\\n\\n`);
+            }
+        };
+
+        const listener = (state) => {
+            res.write(`data: ${JSON.stringify(state)}\\n\\n`);
+        };
+
+        tournamentEventEmitter.on(tournamentId, listener);
+        req.on('close', () => {
+            clearInterval(keepAlive);
+            tournamentEventEmitter.removeListener(tournamentId, listener);
+        });
+
+        await sendState();
     }
 
     static async joinTournament(req, res) {
@@ -2518,6 +2711,8 @@ class TournamentController {
                 { $inc: { currentPlayers: 1 } }
             );
 
+            await notifyTournamentUpdate(tournamentId);
+
             res.json({
                 message: 'Successfully joined tournament',
                 tournamentId,
@@ -2567,6 +2762,8 @@ class TournamentController {
                 { $set: { score: Math.max(participation.score, score) } }
             );
 
+            await notifyTournamentUpdate(tournamentId);
+
             res.json({
                 message: 'Score submitted successfully',
                 tournamentId,
@@ -2597,42 +2794,8 @@ class TournamentController {
                 return res.status(404).json({ message: 'Tournament not found' });
             }
 
-            const leaderboard = await database.collections.TournamentParticipants
-                .find({ tournamentId })
-                .sort({ score: -1 })
-                .limit(parseInt(limit))
-                .project({
-                    id: 1,
-                    userId: 1,
-                    username: 1,
-                    score: 1,
-                    position: 1
-                })
-                .toArray();
-
-            if (leaderboard.length > 0) {
-                let currentPosition = 1;
-                let previousScore = leaderboard[0].score;
-
-                for (let i = 0; i < leaderboard.length; i++) {
-                    if (leaderboard[i].score < previousScore) {
-                        currentPosition = i + 1;
-                        previousScore = leaderboard[i].score;
-                    }
-                    leaderboard[i].position = currentPosition;
-                }
-
-                await Promise.all(leaderboard.map(async (entry, index) => {
-                    await database.collections.TournamentParticipants.updateOne(
-                        { 
-                            tournamentId,
-                            userId: entry.userId
-                        },
-                        { $set: { position: entry.position } }
-                    );
-                }));
-            }
-
+            const leaderboard = await computeTournamentLeaderboard(tournamentId, limit, true);
+            
             res.json({
                 tournamentId,
                 tournamentName: tournament.name,
@@ -2743,6 +2906,8 @@ class TournamentController {
 
             const updatedTournament = await database.collections.Tournaments.findOne({ id });
 
+            await notifyTournamentUpdate(id);
+
             res.json({
                 message: 'Tournament updated successfully',
                 tournament: updatedTournament
@@ -2776,6 +2941,8 @@ class TournamentController {
             if (result.matchedCount === 0) {
                 return res.status(404).json({ message: 'Tournament not found' });
             }
+
+            await notifyTournamentUpdate(id);
 
             res.json({ message: 'Tournament ended successfully' });
 
