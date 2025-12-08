@@ -2582,36 +2582,46 @@ class TournamentController {
     static async getActive(req, res) {
       try {
           const now = new Date();
-          const list = await database.collections.Tournaments.find({
+          
+          // On récupère tes tournois internes
+          const tournaments = await database.collections.Tournaments.find({
               startTime: { $lte: now },
               endTime: { $gte: now },
               isActive: true
           }).toArray();
   
-          const mapped = list.map(t => ({
-              id: Number(t.id) || 1,
-              name: t.name,
-              description: t.description,
-              startTime: t.startTime,
-              endTime: t.endTime,
-              time: t.startTime,
-              maxInvites: t.maxPlayers,
-              currentInvites: t.currentPlayers,
-              iconUrl: "",
-              imageUrl: "",
-              themeColor: "#FFFFFF",
-              status: 1
+          // Conversion → format EXIGÉ PAR LE MOD
+          const mapped = tournaments.map((t, index) => ({
+              id: t.id || (1000 + index),
+  
+              name: t.name || "Tournament",
+              description: t.description || "",
+              
+              // Le mod attend une string :
+              // "registration_open", "running", "finished"
+              status: "registration_open",
+  
+              players: t.currentPlayers || 0,
+              maxPlayers: t.maxPlayers || 16,
+  
+              // Nombre de rounds (le mod ne vérifie même pas mais obligatoire)
+              roundCount: 1,
+  
+              // Images facultatives
+              logo: t.logo || "",
+              imageUrl: t.imageUrl || "",
+  
+              // Si le joueur est inscrit (dans ton futur système)
+              isRegistered: false
           }));
   
-          // IMPORTANT : le mod attend un ARRAY, pas un objet
-          return res.json(mapped);
-  
+          return res.json(mapped); // IMPORTANT : un array directement
       } catch (err) {
-          Console.error('Tournament', 'Get active error:', err);
-          return res.status(500).json({ message: 'Internal server error' });
+          console.error("Tournament getActive error:", err);
+          return res.status(500).json({ message: "Internal server error" });
       }
-  
   }
+  
   
   
 
