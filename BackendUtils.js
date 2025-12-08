@@ -2580,20 +2580,32 @@ class TournamentController {
     }
 
     static async getActive(req, res) {
-        try {
-            const now = new Date();
-            const activeTournaments = await database.collections.Tournaments.find({
-                startTime: { $lte: now },
-                endTime: { $gte: now },
-                isActive: true
-            }).sort({ startTime: 1 }).toArray();
-
-            res.json({ tournaments: activeTournaments });
-        } catch (err) {
-            Console.error('Tournament', 'Get active error:', err);
-            res.status(500).json({ message: 'Internal server error' });
-        }
-    }
+      try {
+          const now = new Date();
+          const activeTournaments = await database.collections.Tournaments.find({
+              startTime: { $lte: now },
+              endTime: { $gte: now },
+              isActive: true
+          }).sort({ startTime: 1 }).toArray();
+  
+          const mapped = activeTournaments.map(t => ({
+              Id: t.id,
+              Name: t.name,
+              Description: t.description,
+              Status: "Open",
+              StartAt: t.startTime,
+              EndAt: t.endTime,
+              Players: t.currentPlayers,
+              MaxPlayers: t.maxPlayers,
+              ServerRegion: "EU"
+          }));
+  
+          res.json({ items: mapped });
+      } catch (err) {
+          Console.error('Tournament', 'Get active error:', err);
+          res.status(500).json({ message: 'Internal server error' });
+      }
+  }
 
     static async getTournamentById(req, res) {
         try {
