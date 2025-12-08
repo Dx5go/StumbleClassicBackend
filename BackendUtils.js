@@ -2136,7 +2136,7 @@ class TournamentXController {
     }
   ];
 
-  static getActive(req, res) {
+  static getActive(req, res) {  
     try {
       const now = new Date();
       res.status(200).json(TournamentXController.tournaments);
@@ -2588,7 +2588,7 @@ class TournamentController {
                 isActive: true
             }).sort({ startTime: 1 }).toArray();
 
-            res.json(activeTournaments);
+            res.json({ tournaments: activeTournaments });
         } catch (err) {
             Console.error('Tournament', 'Get active error:', err);
             res.status(500).json({ message: 'Internal server error' });
