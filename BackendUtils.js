@@ -2582,8 +2582,6 @@ class TournamentController {
     static async getActive(req, res) {
       try {
           const now = new Date();
-  
-          // On ne prend que les tournois actifs dans la fenêtre de temps
           const list = await database.collections.Tournaments.find({
               startTime: { $lte: now },
               endTime: { $gte: now },
@@ -2596,21 +2594,23 @@ class TournamentController {
               description: t.description,
               startTime: t.startTime,
               endTime: t.endTime,
-              time: t.startTime,          // le client utilise "Time"
-              maxInvites: t.maxPlayers,   // mapping vers les champs du client
+              time: t.startTime,
+              maxInvites: t.maxPlayers,
               currentInvites: t.currentPlayers,
               iconUrl: "",
               imageUrl: "",
               themeColor: "#FFFFFF",
-              status: 1                    // 1 = Open (TournamentStatus.Open)
+              status: 1
           }));
   
-          // ⚠️ IMPORTANT : le client attend un objet avec la clé "tournaments"
-          return res.json({ tournaments: mapped });
+          // IMPORTANT : le mod attend un ARRAY, pas un objet
+          return res.json(mapped);
+  
       } catch (err) {
           Console.error('Tournament', 'Get active error:', err);
           return res.status(500).json({ message: 'Internal server error' });
       }
+  
   }
   
   
