@@ -68,25 +68,31 @@ const BackendUtils = {
 
 class Database {
   constructor() {
-    this.mongoUri = config.mongoUri;
-    this.dbName = config.mongoDbName || 'game_backend';
+    this.mongoUri = process.env.mongoUri;
+
+    // 👉 La VRAIE DB que tu utilises
+    this.dbName = process.env.mongoDbName || "StumbleClassic";
+
     this.client = null;
     this.db = null;
+
     this.collections = {
-  Users: null,
-  Analytics: null,
-  News: null,
-  Events: null,
-  BattlePasses: null,
-  Skins: null,
-  Missions: null,
-  PurchasableItems: null,
-  Animations: null,
-  Emotes: null,
-  Footsteps: null,
-  Tournaments: null,
-  TournamentParticipants: null
-};
+      Users: null,
+      Analytics: null,
+      News: null,
+      Events: null,
+      BattlePasses: null,
+      Skins: null,
+      Missions: null,
+      PurchasableItems: null,
+      Animations: null,
+      Emotes: null,
+      Footsteps: null,
+
+      // 👉 Collections utilisées par les tournois
+      Tournaments: null,
+      TournamentParticipants: null,
+    };
   }
 
   async connect() {
@@ -2990,6 +2996,8 @@ async function OnlineCheck(req, res) {
 }
 
 module.exports = {
+  mongoUri: "ton_url_mongo_atlas",
+  mongoDbName: "StumbleClassic",
   BackendUtils,
   Database,
   UserModel,
@@ -3012,4 +3020,4 @@ module.exports = {
   OnlineCheck,
   VerifyPhoton,
   generatePhotonJwt
-};
+}
