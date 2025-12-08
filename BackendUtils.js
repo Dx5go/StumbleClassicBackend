@@ -2582,30 +2582,37 @@ class TournamentController {
     static async getActive(req, res) {
       try {
           const now = new Date();
-          const activeTournaments = await database.collections.Tournaments.find({
+  
+          // On ne prend que les tournois actifs dans la fenêtre de temps
+          const list = await database.collections.Tournaments.find({
               startTime: { $lte: now },
               endTime: { $gte: now },
               isActive: true
-          }).sort({ startTime: 1 }).toArray();
+          }).toArray();
   
-          const mapped = activeTournaments.map(t => ({
-              Id: t.id,
-              Name: t.name,
-              Description: t.description,
-              BeginTime: t.startTime,
-              EndTime: t.endTime,
-              CurrentPlayers: t.currentPlayers,
-              MaxPlayers: t.maxPlayers,
-              Status: "Open",
-              Region: "EU"
+          const mapped = list.map(t => ({
+              id: Number(t.id) || 1,
+              name: t.name,
+              description: t.description,
+              startTime: t.startTime,
+              endTime: t.endTime,
+              time: t.startTime,          // le client utilise "Time"
+              maxInvites: t.maxPlayers,   // mapping vers les champs du client
+              currentInvites: t.currentPlayers,
+              iconUrl: "",
+              imageUrl: "",
+              themeColor: "#FFFFFF",
+              status: 1                    // 1 = Open (TournamentStatus.Open)
           }));
   
-          res.json(mapped);      
+          // ⚠️ IMPORTANT : le client attend un objet avec la clé "tournaments"
+          return res.json({ tournaments: mapped });
       } catch (err) {
           Console.error('Tournament', 'Get active error:', err);
-          res.status(500).json({ message: 'Internal server error' });
+          return res.status(500).json({ message: 'Internal server error' });
       }
   }
+  
   
 
 
