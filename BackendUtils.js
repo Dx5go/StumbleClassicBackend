@@ -2600,7 +2600,7 @@ class TournamentController {
               Region: "EU"
           }));
   
-          res.json({ Tournaments: mapped });
+          res.json(mapped);      
       } catch (err) {
           Console.error('Tournament', 'Get active error:', err);
           res.status(500).json({ message: 'Internal server error' });
