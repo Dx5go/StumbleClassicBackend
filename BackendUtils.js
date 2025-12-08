@@ -2583,44 +2583,36 @@ class TournamentController {
       try {
           const now = new Date();
           
-          // On récupère tes tournois internes
           const tournaments = await database.collections.Tournaments.find({
               startTime: { $lte: now },
               endTime: { $gte: now },
               isActive: true
           }).toArray();
   
-          // Conversion → format EXIGÉ PAR LE MOD
           const mapped = tournaments.map((t, index) => ({
               id: t.id || (1000 + index),
-  
               name: t.name || "Tournament",
               description: t.description || "",
-              
-              // Le mod attend une string :
-              // "registration_open", "running", "finished"
               status: "registration_open",
-  
               players: t.currentPlayers || 0,
               maxPlayers: t.maxPlayers || 16,
-  
-              // Nombre de rounds (le mod ne vérifie même pas mais obligatoire)
               roundCount: 1,
-  
-              // Images facultatives
-              logo: t.logo || "",
-              imageUrl: t.imageUrl || "",
-  
-              // Si le joueur est inscrit (dans ton futur système)
+              logo: "",
+              imageUrl: "",
               isRegistered: false
           }));
   
-          return res.json(mapped); // IMPORTANT : un array directement
+          // 🔥 ATTENTION : le mod veut absolument un OBJET avec une clé "tournaments"
+          return res.json({
+              tournaments: mapped
+          });
+  
       } catch (err) {
           console.error("Tournament getActive error:", err);
           return res.status(500).json({ message: "Internal server error" });
       }
   }
+  
   
   
   
