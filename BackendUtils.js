@@ -2592,20 +2592,22 @@ class TournamentController {
               Id: t.id,
               Name: t.name,
               Description: t.description,
-              Status: "Open",
-              StartAt: t.startTime,
-              EndAt: t.endTime,
-              Players: t.currentPlayers,
+              BeginTime: t.startTime,
+              EndTime: t.endTime,
+              CurrentPlayers: t.currentPlayers,
               MaxPlayers: t.maxPlayers,
-              ServerRegion: "EU"
+              Status: "Open",
+              Region: "EU"
           }));
   
-          res.json({ items: mapped });
+          res.json({ Tournaments: mapped });
       } catch (err) {
           Console.error('Tournament', 'Get active error:', err);
           res.status(500).json({ message: 'Internal server error' });
       }
   }
+  
+
 
     static async getTournamentById(req, res) {
         try {
