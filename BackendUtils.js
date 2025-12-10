@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
@@ -70,13 +70,13 @@ class Database {
   constructor() {
     this.mongoUri = process.env.mongoUri;
 
-    // 👉 La VRAIE DB que tu utilises
+    // ðŸ‘‰ La VRAIE DB que tu utilises
     this.dbName = process.env.mongoDbName || "StumbleClassic";
 
     this.client = null;
     this.db = null;
 
-    this.collections = {
+        this.collections = {
       Users: null,
       Analytics: null,
       News: null,
@@ -89,9 +89,10 @@ class Database {
       Emotes: null,
       Footsteps: null,
 
-      // 👉 Collections utilisées par les tournois
+      // Collections utilisées par les tournois
       Tournaments: null,
       TournamentParticipants: null,
+      TournamentsInscriptions: null,
     };
   }
 
@@ -107,19 +108,20 @@ class Database {
     this.client = new MongoClient(this.mongoUri);
     await this.client.connect();
     this.db = this.client.db(this.dbName);
-    this.collections.Users = this.db.collection("Users");
-this.collections.Analytics = this.db.collection("Analytics");
-this.collections.News = this.db.collection("News");
-this.collections.Events = this.db.collection("Events");
-this.collections.BattlePasses = this.db.collection("BattlePasses");
-this.collections.Skins = this.db.collection("Skins");
-this.collections.Missions = this.db.collection("Missions");
-this.collections.PurchasableItems = this.db.collection("PurchasableItems");
-this.collections.Animations = this.db.collection("Animations");
-this.collections.Emotes = this.db.collection("Emotes");
-this.collections.Footsteps = this.db.collection("Footsteps");
-this.collections.Tournaments = this.db.collection("Tournaments");
-this.collections.TournamentParticipants = this.db.collection("TournamentParticipants");
+        this.collections.Users = this.db.collection("Users");
+    this.collections.Analytics = this.db.collection("Analytics");
+    this.collections.News = this.db.collection("News");
+    this.collections.Events = this.db.collection("Events");
+    this.collections.BattlePasses = this.db.collection("BattlePasses");
+    this.collections.Skins = this.db.collection("Skins");
+    this.collections.Missions = this.db.collection("Missions");
+    this.collections.PurchasableItems = this.db.collection("PurchasableItems");
+    this.collections.Animations = this.db.collection("Animations");
+    this.collections.Emotes = this.db.collection("Emotes");
+    this.collections.Footsteps = this.db.collection("Footsteps");
+    this.collections.Tournaments = this.db.collection("Tournaments");
+    this.collections.TournamentParticipants = this.db.collection("TournamentParticipants");
+    this.collections.TournamentsInscriptions = this.db.collection("TournamentsInscriptions");
 
     await this.createIndexes();
     await this.autoPopulateSharedData();
@@ -161,7 +163,7 @@ async autoPopulateSharedData() {
         }
 
     } catch (error) {
-        Console.error('Populate', 'Erro ao popular coleções:', error);
+        Console.error('Populate', 'Erro ao popular coleÃ§Ãµes:', error);
     }
 }
   async createIndexes() {
@@ -189,6 +191,12 @@ async autoPopulateSharedData() {
       await this.collections.TournamentParticipants.createIndexes([
         { key: { tournamentId: 1, userId: 1 }, unique: true },
         { key: { tournamentId: 1, score: -1 } }
+      ]);
+    }
+    if (this.collections.TournamentsInscriptions) {
+      await this.collections.TournamentsInscriptions.createIndexes([
+        { key: { tournamentId: 1, userId: 1 }, unique: true },
+        { key: { registeredAt: 1 } }
       ]);
     }
   }
@@ -893,20 +901,20 @@ static async updateUsername(req, res) {
     const { Username } = req.body;
     const { user } = req;
     
-    // Validação do formato do username
+    // ValidaÃ§Ã£o do formato do username
     if (!/^[a-zA-Z0-9_]+$/.test(Username)) {
       res.status(422).json({ message: 'Username can only contain letters, numbers, and underscores' });
       return;
     }
 
-    // Verifica se o username já existe
+    // Verifica se o username jÃ¡ existe
     const existingUser = await database.getUserByQuery({ username: Username });
     if (existingUser) {
       res.status(409).json({ message: 'Username already taken' });
       return;
     }
 
-    // Se todas as validações passarem, atualiza o usuário
+    // Se todas as validaÃ§Ãµes passarem, atualiza o usuÃ¡rio
     const updatedUser = await UserModel.update(user.stumbleId, { username: Username });
     res.status(200).json({ User: updatedUser });
     
@@ -2602,7 +2610,7 @@ class TournamentController {
               isRegistered: false
           }));
   
-          // 🔥 ATTENTION : le mod veut absolument un OBJET avec une clé "tournaments"
+          // ðŸ”¥ ATTENTION : le mod veut absolument un OBJET avec une clÃ© "tournaments"
           return res.json({
               tournaments: mapped
           });
@@ -2681,15 +2689,24 @@ class TournamentController {
 
     static async joinTournament(req, res) {
         try {
-            const { user } = req;
             const { tournamentId } = req.params;
+            const { userId, username, region, country } = req.body || {};
 
             if (!tournamentId) {
                 return res.status(400).json({ message: 'Tournament ID is required' });
             }
 
-            const tournament = await database.collections.Tournaments.findOne({ 
-                id: tournamentId,
+            if (userId === undefined || userId === null) {
+                return res.status(400).json({ message: 'userId is required' });
+            }
+
+            // Recherche le tournoi (par id ou _id)
+            const tournament = await database.collections.Tournaments.findOne({
+                $or: [
+                    { id: tournamentId },
+                    { _id: tournamentId },
+                    (() => { try { return { _id: new ObjectId(tournamentId) }; } catch { return null; } })()
+                ].filter(Boolean),
                 isActive: true
             });
 
@@ -2697,56 +2714,43 @@ class TournamentController {
                 return res.status(404).json({ message: 'Tournament not found or inactive' });
             }
 
-            const now = new Date();
-            if (now < tournament.startTime) {
-                return res.status(400).json({ message: 'Tournament has not started yet' });
+            const inscriptions = database.collections.TournamentsInscriptions;
+            const filter = { tournamentId, userId: Number(userId) };
+            const existing = await inscriptions.findOne(filter);
+            if (existing) {
+                return res.status(409).json({ alreadyRegistered: true, inscription: existing });
             }
 
-            if (tournament.currentPlayers >= tournament.maxPlayers) {
-                return res.status(400).json({ message: 'Tournament is full' });
-            }
-
-            const existingParticipation = await database.collections.TournamentParticipants.findOne({
+            const doc = {
                 tournamentId,
-                userId: user.id
-            });
+                userId: Number(userId),
+                username: username || '',
+                region: region || '',
+                country: country || '',
+                registeredAt: new Date(),
+                status: 'registered'
+            };
 
-            if (existingParticipation) {
-                return res.status(400).json({ message: 'You have already joined this tournament' });
-            }
-
-            if (tournament.entryFee > 0) {
-                const userBalance = UserModel.getBalanceAmount(user, 'gems');
-                if (userBalance < tournament.entryFee) {
-                    return res.status(400).json({ message: 'Not enough gems to join tournament' });
+            try {
+                await inscriptions.insertOne(doc);
+            } catch (err) {
+                if (err && err.code === 11000) {
+                    const dup = await inscriptions.findOne(filter);
+                    return res.status(409).json({ alreadyRegistered: true, inscription: dup });
                 }
-                
-                await UserModel.removeBalance(user.stumbleId, 'gems', tournament.entryFee);
+                Console.error('Tournament', 'Join error (mongo insert):', err);
+                return res.status(500).json({ message: 'Internal server error' });
             }
 
-            await database.collections.TournamentParticipants.insertOne({
-                id: uuidv4(),
-                tournamentId,
-                userId: user.id,
-                username: user.username,
-                joinTime: new Date(),
-                score: 0,
-                position: 0,
-                rewardsClaimed: false
-            });
-
-            await database.collections.Tournaments.updateOne(
-                { id: tournamentId },
-                { $inc: { currentPlayers: 1 } }
-            );
+            // Mets à jour le compteur si le tournoi a un currentPlayers
+            if (typeof tournament.currentPlayers === 'number') {
+                const incFilter = tournament._id ? { _id: tournament._id } : { id: tournament.id || tournamentId };
+                await database.collections.Tournaments.updateOne(incFilter, { $inc: { currentPlayers: 1 } });
+            }
 
             await notifyTournamentUpdate(tournamentId);
 
-            res.json({
-                message: 'Successfully joined tournament',
-                tournamentId,
-                entryFeePaid: tournament.entryFee
-            });
+            return res.status(201).json({ created: true, inscription: doc });
 
         } catch (err) {
             Console.error('Tournament', 'Join error:', err);
@@ -3044,3 +3048,7 @@ module.exports = {
   VerifyPhoton,
   generatePhotonJwt
 }
+
+
+
+
