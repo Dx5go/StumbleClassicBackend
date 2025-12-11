@@ -2590,43 +2590,79 @@ class TournamentController {
     static async getActive(req, res) {
       try {
           const now = new Date();
-          
+
+          // Identifie l'utilisateur courant (header pose par le mod)
+          const rawUserId = req.headers['x-user-id'] || req.headers['x-user-id'.toLowerCase()];
+          const currentUserId = rawUserId ? Number(rawUserId) : null;
+
+          // Récupère tous les tournois actifs (upcoming + running); le statut est recalculé ci‑dessous.
           const tournaments = await database.collections.Tournaments.find({
-              startTime: { $lte: now },
-              endTime: { $gte: now },
               isActive: true
           }).toArray();
-  
-          const mapped = tournaments.map((t, index) => ({
-              id: t.id || (1000 + index),
-              name: t.name || "Tournament",
-              description: t.description || "",
-              status: "registration_open",
-              players: t.currentPlayers || 0,
-              maxPlayers: t.maxPlayers || 16,
-              roundCount: 1,
-              logo: "",
-              imageUrl: "",
-              isRegistered: false
-          }));
-  
-          // ðŸ”¥ ATTENTION : le mod veut absolument un OBJET avec une clÃ© "tournaments"
+
+          // Stats d'inscriptions (players + isRegistered)
+          const ids = tournaments.map(t => t.id);
+          const inscriptionAgg = await database.collections.TournamentsInscriptions.aggregate([
+              { $match: { tournamentId: { $in: ids } } },
+              {
+                  $group: {
+                      _id: '$tournamentId',
+                      count: { $sum: 1 },
+                      users: currentUserId ? { $addToSet: '$userId' } : { $push: '$userId' }
+                  }
+              }
+          ]).toArray();
+
+          const statsById = Object.fromEntries(
+              inscriptionAgg.map(x => [x._id, {
+                  count: x.count || 0,
+                  isRegistered: currentUserId != null && (x.users || []).includes(currentUserId)
+              }])
+          );
+
+          const mapped = tournaments.map((t, index) => {
+              const stat = statsById[t.id] || { count: t.currentPlayers || 0, isRegistered: false };
+
+              // Dates : si absentes, fallback sur maintenant + quelques minutes
+              const startTime = t.startTime ? new Date(t.startTime) : new Date(Date.now() + 15 * 60 * 1000);
+              const registrationOpensAt = t.registrationOpensAt ? new Date(t.registrationOpensAt) : new Date(startTime.getTime() - 15 * 60 * 1000);
+              const endTime = t.endTime ? new Date(t.endTime) : new Date(startTime.getTime() + 2 * 60 * 60 * 1000);
+
+              let status = 'scheduled';
+              if (now >= startTime && now <= endTime) status = 'running';
+              else if (now < startTime) status = 'registration_open';
+              else if (now > endTime) status = 'finished';
+
+              return {
+                  id: t.id || (1000 + index),
+                  name: t.name || "Tournament",
+                  description: t.description || "",
+                  status,
+                  players: stat.count,
+                  maxPlayers: t.maxPlayers || 16,
+                  roundCount: 1,
+                  logo: t.logo || "",
+                  imageUrl: t.imageUrl || "",
+                  isRegistered: !!stat.isRegistered,
+                  startAt: startTime.toISOString(),
+                  registrationOpensAt: registrationOpensAt.toISOString()
+              };
+          });
+
           return res.json({
               tournaments: mapped
           });
-  
+
       } catch (err) {
           console.error("Tournament getActive error:", err);
           return res.status(500).json({ message: "Internal server error" });
       }
   }
-  
-  
-  
-  
 
 
-    static async getTournamentById(req, res) {
+
+
+static async getTournamentById(req, res) {
         try {
             const { id } = req.params;
             
@@ -3048,6 +3084,8 @@ module.exports = {
   VerifyPhoton,
   generatePhotonJwt
 }
+
+
 
 
 
