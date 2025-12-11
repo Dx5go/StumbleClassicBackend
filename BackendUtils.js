@@ -2625,12 +2625,12 @@ class TournamentController {
 
               // Dates : si absentes, fallback sur maintenant + quelques minutes
               const startTime = t.startTime ? new Date(t.startTime) : new Date(Date.now() + 15 * 60 * 1000);
-              const registrationOpensAt = t.registrationOpensAt ? new Date(t.registrationOpensAt) : new Date(startTime.getTime() - 15 * 60 * 1000);
+              const registrationOpensAt = t.registrationOpensAt ? new Date(t.registrationOpensAt) : new Date(startTime.getTime() - 60 * 60 * 1000); // 1h avant
               const endTime = t.endTime ? new Date(t.endTime) : new Date(startTime.getTime() + 2 * 60 * 60 * 1000);
 
               let status = 'scheduled';
               if (now >= startTime && now <= endTime) status = 'running';
-              else if (now < startTime) status = 'registration_open';
+              else if (now >= registrationOpensAt && now < startTime) status = 'registration_open';
               else if (now > endTime) status = 'finished';
 
               return {
@@ -2748,6 +2748,16 @@ static async getTournamentById(req, res) {
 
             if (!tournament) {
                 return res.status(404).json({ message: 'Tournament not found or inactive' });
+            }
+
+            const now = new Date();
+            const startTime = tournament.startTime ? new Date(tournament.startTime) : new Date(now.getTime() + 15 * 60 * 1000);
+            const registrationOpensAt = tournament.registrationOpensAt ? new Date(tournament.registrationOpensAt) : new Date(startTime.getTime() - 60 * 60 * 1000);
+            if (now < registrationOpensAt) {
+                return res.status(400).json({ message: 'Registration not yet open' });
+            }
+            if (now >= startTime) {
+                return res.status(400).json({ message: 'Registration closed' });
             }
 
             const inscriptions = database.collections.TournamentsInscriptions;
