@@ -195,7 +195,10 @@ async autoPopulateSharedData() {
         { key: { tournamentId: 1, score: -1 } }
       ]);
     }
-    const signupsCol = this.collections.TournamentsSignUps || this.collections.TournamentsInscriptions;
+    const signupsCol =
+      this.collections.TournamentParticipants ||
+      this.collections.TournamentsSignUps ||
+      this.collections.TournamentsInscriptions;
     if (signupsCol) {
       await signupsCol.createIndexes([
         { key: { tournamentId: 1, userId: 1 }, unique: true },
@@ -2605,7 +2608,10 @@ class TournamentController {
 
           // Stats d'inscriptions (players + isRegistered)
           const ids = tournaments.map(t => t.id);
-          const signupsCol = database.collections.TournamentsSignUps || database.collections.TournamentsInscriptions;
+          const signupsCol =
+            database.collections.TournamentParticipants ||
+            database.collections.TournamentsSignUps ||
+            database.collections.TournamentsInscriptions;
           const inscriptionAgg = await signupsCol.aggregate([
               { $match: { tournamentId: { $in: ids } } },
               {
@@ -2757,14 +2763,19 @@ static async getTournamentById(req, res) {
             const now = new Date();
             const startTime = tournament.startTime ? new Date(tournament.startTime) : new Date(now.getTime() + 15 * 60 * 1000);
             const registrationOpensAt = tournament.registrationOpensAt ? new Date(tournament.registrationOpensAt) : new Date(startTime.getTime() - 60 * 60 * 1000);
-            if (now < registrationOpensAt) {
+            const statusAllowsRegistration = (tournament.status && tournament.status.toLowerCase() === 'registration_open');
+
+            if (!statusAllowsRegistration && now < registrationOpensAt) {
                 return res.status(400).json({ message: 'Registration not yet open' });
             }
             if (now >= startTime) {
                 return res.status(400).json({ message: 'Registration closed' });
             }
 
-            const signups = database.collections.TournamentsSignUps || database.collections.TournamentsInscriptions;
+            const signups =
+                database.collections.TournamentParticipants ||
+                database.collections.TournamentsSignUps ||
+                database.collections.TournamentsInscriptions;
             const filter = { tournamentId, userId: Number(userId) };
             const existing = await signups.findOne(filter);
             if (existing) {
