@@ -93,6 +93,7 @@ class Database {
       Tournaments: null,
       TournamentParticipants: null,
       TournamentsInscriptions: null,
+      TournamentsSignUps: null,
     };
   }
 
@@ -122,6 +123,7 @@ class Database {
     this.collections.Tournaments = this.db.collection("Tournaments");
     this.collections.TournamentParticipants = this.db.collection("TournamentParticipants");
     this.collections.TournamentsInscriptions = this.db.collection("TournamentsInscriptions");
+    this.collections.TournamentsSignUps = this.db.collection("TournamentsSignUps");
 
     await this.createIndexes();
     await this.autoPopulateSharedData();
@@ -193,8 +195,9 @@ async autoPopulateSharedData() {
         { key: { tournamentId: 1, score: -1 } }
       ]);
     }
-    if (this.collections.TournamentsInscriptions) {
-      await this.collections.TournamentsInscriptions.createIndexes([
+    const signupsCol = this.collections.TournamentsSignUps || this.collections.TournamentsInscriptions;
+    if (signupsCol) {
+      await signupsCol.createIndexes([
         { key: { tournamentId: 1, userId: 1 }, unique: true },
         { key: { registeredAt: 1 } }
       ]);
@@ -2602,7 +2605,8 @@ class TournamentController {
 
           // Stats d'inscriptions (players + isRegistered)
           const ids = tournaments.map(t => t.id);
-          const inscriptionAgg = await database.collections.TournamentsInscriptions.aggregate([
+          const signupsCol = database.collections.TournamentsSignUps || database.collections.TournamentsInscriptions;
+          const inscriptionAgg = await signupsCol.aggregate([
               { $match: { tournamentId: { $in: ids } } },
               {
                   $group: {
@@ -2760,9 +2764,9 @@ static async getTournamentById(req, res) {
                 return res.status(400).json({ message: 'Registration closed' });
             }
 
-            const inscriptions = database.collections.TournamentsInscriptions;
+            const signups = database.collections.TournamentsSignUps || database.collections.TournamentsInscriptions;
             const filter = { tournamentId, userId: Number(userId) };
-            const existing = await inscriptions.findOne(filter);
+            const existing = await signups.findOne(filter);
             if (existing) {
                 return res.status(409).json({ alreadyRegistered: true, inscription: existing });
             }
@@ -2778,10 +2782,10 @@ static async getTournamentById(req, res) {
             };
 
             try {
-                await inscriptions.insertOne(doc);
+                await signups.insertOne(doc);
             } catch (err) {
                 if (err && err.code === 11000) {
-                    const dup = await inscriptions.findOne(filter);
+                    const dup = await signups.findOne(filter);
                     return res.status(409).json({ alreadyRegistered: true, inscription: dup });
                 }
                 Console.error('Tournament', 'Join error (mongo insert):', err);
